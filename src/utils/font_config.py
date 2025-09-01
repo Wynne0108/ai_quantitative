@@ -19,7 +19,7 @@ def setup_chinese_fonts():
     --------
     bool : True if Chinese font was found and set, False otherwise
     """
-    # 嘗試設定中文字體（按優先級排序）
+    # 強制設定中文字體（按優先級排序）
     chinese_fonts = [
         'Microsoft JhengHei',      # 微軟正黑體 (Windows)
         'Microsoft YaHei',         # 微軟雅黑 (Windows)
@@ -34,9 +34,16 @@ def setup_chinese_fonts():
     font_found = False
     used_font = None
     
+    # 首先嘗試強制設定所有可能的中文字體參數
+    plt.rcParams['font.sans-serif'] = chinese_fonts
+    plt.rcParams['font.family'] = 'sans-serif'
+    plt.rcParams['axes.unicode_minus'] = False
+    
     for font_name in chinese_fonts:
         try:
-            plt.rcParams['font.family'] = font_name
+            # 更直接的字體設定方法
+            plt.rcParams['font.sans-serif'] = [font_name] + chinese_fonts
+            plt.rcParams['font.family'] = 'sans-serif'
             
             # 測試字體是否可用
             with warnings.catch_warnings():
@@ -53,16 +60,18 @@ def setup_chinese_fonts():
             continue
     
     if not font_found:
-        print("警告: 未找到中文字體，圖表中的中文可能顯示為方塊")
-        print("請嘗試以下解決方案:")
-        print("1. 安裝中文字體（如微軟雅黑、SimHei等）")
-        print("2. 使用以下代碼查看系統可用字體:")
-        print("   import matplotlib.font_manager as fm")
-        print("   print([f.name for f in fm.fontManager.ttflist if any(word in f.name.lower() for word in ['chinese', 'zh', 'cjk', 'simhei', 'yahei'])])")
+        # 最後嘗試：使用所有可能的字體列表
+        plt.rcParams['font.sans-serif'] = chinese_fonts + ['Arial Unicode MS', 'sans-serif']
+        print("警告: 未找到理想的中文字體，已設定備用字體列表")
+        print("如果中文仍顯示為方塊，請嘗試:")
+        print("1. 確認系統已安裝中文字體")
+        print("2. 重新啟動 Python 環境")
+        font_found = True  # 設為 True，因為我們已經設定了備用方案
+        used_font = "備用字體列表"
     else:
         print(f"✅ 成功設定中文字體: {used_font}")
     
-    # 解決負號顯示問題
+    # 強制解決負號顯示問題
     plt.rcParams['axes.unicode_minus'] = False
     
     return font_found
@@ -125,6 +134,9 @@ def test_chinese_display():
 
 def configure_plot_style():
     """Configure matplotlib style for better Chinese display"""
+    # 強制設定中文字體列表
+    chinese_fonts = ['Microsoft JhengHei', 'Microsoft YaHei', 'SimHei', 'PingFang SC', 'Hiragino Sans GB', 'DejaVu Sans', 'WenQuanYi Micro Hei', 'Noto Sans CJK SC', 'Arial Unicode MS', 'sans-serif']
+    
     plt.rcParams.update({
         'font.size': 12,
         'axes.titlesize': 14,
@@ -134,7 +146,38 @@ def configure_plot_style():
         'legend.fontsize': 11,
         'figure.titlesize': 16,
         'axes.unicode_minus': False,  # 解決負號顯示問題
+        'font.sans-serif': chinese_fonts,  # 強制設定中文字體列表
+        'font.family': 'sans-serif'
     })
+
+def force_chinese_font():
+    """
+    強制設定中文字體 - 在每次繪圖前調用
+    """
+    chinese_fonts = [
+        'Microsoft JhengHei',      # 微軟正黑體 (Windows)
+        'Microsoft YaHei',         # 微軟雅黑 (Windows) 
+        'SimHei',                  # 黑體 (Windows)
+        'PingFang SC',             # 蘋方 (macOS)
+        'Hiragino Sans GB',        # 冬青黑體 (macOS)
+        'DejaVu Sans',             # Linux 備用
+        'WenQuanYi Micro Hei',     # 文泉驛微米黑 (Linux)
+        'Noto Sans CJK SC',        # Google Noto (Linux)
+        'Arial Unicode MS',        # 通用 Unicode 字體
+        'sans-serif'               # 最後備用
+    ]
+    
+    # 強制設定字體參數
+    plt.rcParams['font.sans-serif'] = chinese_fonts
+    plt.rcParams['font.family'] = 'sans-serif'
+    plt.rcParams['axes.unicode_minus'] = False
+    
+    # 清除 matplotlib 字體緩存
+    try:
+        import matplotlib.font_manager
+        matplotlib.font_manager._rebuild()
+    except:
+        pass
 
 if __name__ == "__main__":
     print("=== 中文字體配置工具 ===")

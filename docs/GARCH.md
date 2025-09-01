@@ -112,3 +112,39 @@
   2. 實作波動率預測
   3. 結合 ARIMA + GARCH
   4. 建立風險管理工具
+
+
+    📊 完整的 GARCH 系統
+
+  核心組件:
+
+  1. GARCH 模型核心 (src/models/foundations/garch_model.py) - 完整的 GARCH(1,1)        
+  實現，包含波動率預測和風險管理
+  2. ARIMA-GARCH 組合模型 (src/models/intermediate/arima_garch_combined.py) -
+  價格與波動率雙重預測
+  3. GARCH 分析筆記本 (notebooks/stage1_foundations/02_garch_volatility.ipynb) -       
+  互動式學習教程
+
+  演示腳本:
+
+  - scripts/demo_garch_btc.py - 純 GARCH 波動率分析
+  - scripts/demo_combined_btc.py - ARIMA+GARCH 組合分析
+
+  主要功能:
+
+  - ✅ 波動率預測: 使用 GARCH 模型預測未來波動率
+  - ✅ 風險管理: 計算 VaR/CVaR 風險指標
+  - ✅ 交易信號: 基於價格和波動率的綜合交易建議
+  - ✅ 模型診斷: ARCH 效應檢測和模型評估
+  - ✅ 視覺化分析: 完整的圖表和報告生成
+
+  使用方式:
+
+  # 純 GARCH 分析
+  python scripts/demo_garch_btc.py
+
+  # ARIMA+GARCH 組合分析  
+  python scripts/demo_combined_btc.py
+
+  # 或在 Jupyter 中運行筆記本
+  jupyter notebook notebooks/stage1_foundations/02_garch_volatility.ipynb
