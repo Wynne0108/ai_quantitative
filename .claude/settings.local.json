@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(move:*)",
+      "Bash(move PROJECT_STRUCTURE.md docs/)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
