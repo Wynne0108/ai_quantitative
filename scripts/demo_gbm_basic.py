@@ -115,8 +115,8 @@ def main():
     
     print(f"\nGBM Model Results:")
     print(f"   Current BTC Price: ${current_price:,.2f}")
-    print(f"   Annual Drift Rate (μ): {mu_annual:.4f} ({mu_annual*100:+.2f}%)")
-    print(f"   Annual Volatility (σ): {sigma_annual:.4f} ({sigma_annual*100:.2f}%)")
+    print(f"   Annual Drift Rate (mu): {mu_annual:.4f} ({mu_annual*100:+.2f}%)")
+    print(f"   Annual Volatility (sigma): {sigma_annual:.4f} ({sigma_annual*100:.2f}%)")
     
     print(f"\nPrice Forecasts:")
     print(f"   30-day expected price: ${forecast_30d['expected_price']:,.2f}")

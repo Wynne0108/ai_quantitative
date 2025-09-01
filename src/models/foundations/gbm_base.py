@@ -373,8 +373,8 @@ class GBMModel:
             risk_metrics[f'VaR_{int(conf_level*100)}'] = var_dollar
             risk_metrics[f'CVaR_{int(conf_level*100)}'] = cvar_dollar
             
-            print(f"   {int(conf_level*100)}% VaR ({time_horizon}日): ${var_dollar:,.0f}")
-            print(f"   {int(conf_level*100)}% CVaR ({time_horizon}日): ${cvar_dollar:,.0f}")
+            print(f"   {int(conf_level*100)}% VaR ({time_horizon}d): ${var_dollar:,.0f}")
+            print(f"   {int(conf_level*100)}% CVaR ({time_horizon}d): ${cvar_dollar:,.0f}")
         
         return risk_metrics
     
