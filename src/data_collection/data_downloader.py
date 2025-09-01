@@ -24,7 +24,7 @@ class UnifiedDataDownloader:
     Unified data downloader that supports multiple cryptocurrency exchanges
     """
     
-    def __init__(self, data_folder: str = 'data/raw'):
+    def __init__(self, data_folder: str = 'data/raw', verify_ssl: bool = False):
         """
         Initialize unified data downloader
         
@@ -32,10 +32,12 @@ class UnifiedDataDownloader:
         -----------
         data_folder : str
             Base folder for storing downloaded data
+        verify_ssl : bool
+            Whether to verify SSL certificates (default: False to avoid SSL issues)
         """
         self.data_folder = data_folder
-        self.binance_collector = BinanceDataCollector()
-        self.bybit_collector = BybitDataCollector()
+        self.binance_collector = BinanceDataCollector(verify_ssl=verify_ssl)
+        self.bybit_collector = BybitDataCollector(verify_ssl=verify_ssl)
         
         # Create data folders
         self._create_data_folders()
@@ -463,8 +465,8 @@ def demo_data_downloader():
     """
     print("=== 統一數據下載器演示 ===")
     
-    # Initialize downloader
-    downloader = UnifiedDataDownloader()
+    # Initialize downloader (SSL verification disabled by default)
+    downloader = UnifiedDataDownloader(verify_ssl=False)
     
     # Example 1: Download single pair
     print("\n1. 下載單一交易對 (BTC):")

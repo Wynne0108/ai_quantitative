@@ -106,6 +106,12 @@ def parse_arguments():
         help='Show current market overview'
     )
     
+    parser.add_argument(
+        '--verify-ssl',
+        action='store_true',
+        help='Enable SSL certificate verification (default: disabled to avoid SSL issues)'
+    )
+    
     return parser.parse_args()
 
 def download_single_symbol(downloader, symbol, args):
@@ -179,7 +185,7 @@ def main():
     print(f"市場類型: {args.market_type}")
     
     # Initialize data downloader
-    downloader = UnifiedDataDownloader(data_folder=args.output_dir)
+    downloader = UnifiedDataDownloader(data_folder=args.output_dir, verify_ssl=args.verify_ssl)
     
     # Show market overview if requested
     if args.market_overview:

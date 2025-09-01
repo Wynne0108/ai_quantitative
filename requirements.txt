@@ -19,6 +19,7 @@ tensorflow>=2.8.0
 
 # API and Data Collection
 requests>=2.27.0
+urllib3>=1.26.0
 ccxt>=2.0.0  # Cryptocurrency exchange library
 
 # Jupyter and Development

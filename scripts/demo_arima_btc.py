@@ -34,14 +34,14 @@ def main():
     
     # Step 1: Collect BTC data
     print("\n1. 正在收集 BTC 數據...")
-    collector = BinanceDataCollector()
+    collector = BinanceDataCollector(verify_ssl=False)  # 跳過 SSL 驗證
     
     try:
         # Get 30 days of hourly BTC data
         btc_data = collector.get_multiple_periods_data(
             symbol='BTCUSDT',
-            interval='1h', 
-            days=30,
+            interval='4h', 
+            days=90,
             market_type='spot'
         )
         
@@ -75,9 +75,9 @@ def main():
     # Step 4: Find optimal parameters
     print("\n4. 尋找最優 ARIMA 參數...")
     best_params, results_df = arima_model.find_best_arima_params(
-        p_range=range(0, 3),
+        p_range=range(1, 4),  # 避免 p=0，確保有自回歸項
         d_range=range(0, 3), 
-        q_range=range(0, 3)
+        q_range=range(1, 4)   # 避免 q=0，確保有移動平均項
     )
     
     # Step 5: Fit model

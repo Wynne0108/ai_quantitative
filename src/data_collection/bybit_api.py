@@ -29,10 +29,17 @@ class BybitDataCollector:
     4. Format data for ARIMA model usage
     """
     
-    def __init__(self):
+    def __init__(self, verify_ssl=False):
         """Initialize Bybit Data Collector"""
         self.base_url = "https://api.bybit.com"
         self.session = requests.Session()
+        
+        # SSL verification setting
+        self.verify_ssl = verify_ssl
+        if not verify_ssl:
+            # Disable SSL warnings
+            import urllib3
+            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
         
         # Rate limiting parameters
         self.last_request_time = 0
@@ -73,7 +80,7 @@ class BybitDataCollector:
         self._wait_for_rate_limit()
         
         try:
-            response = self.session.get(url, params=params, timeout=30)
+            response = self.session.get(url, params=params, timeout=30, verify=self.verify_ssl)
             response.raise_for_status()
             data = response.json()
             

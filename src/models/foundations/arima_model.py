@@ -19,6 +19,20 @@ from statsmodels.stats.diagnostic import acorr_ljungbox
 import warnings
 warnings.filterwarnings('ignore')
 
+# 導入字體配置工具
+try:
+    from ..utils.font_config import setup_chinese_fonts, configure_plot_style
+    # 自動配置中文字體
+    setup_chinese_fonts()
+    configure_plot_style()
+except ImportError:
+    # 如果無法導入字體配置工具，使用基本配置
+    plt.rcParams['axes.unicode_minus'] = False
+    try:
+        plt.rcParams['font.family'] = ['Microsoft YaHei', 'SimHei', 'DejaVu Sans']
+    except:
+        pass
+
 class ARIMAModel:
     """
     ARIMA Model for Cryptocurrency Price Prediction
@@ -259,15 +273,56 @@ class ARIMAModel:
         # Create forecast index
         last_date = self.data.index[-1]
         if isinstance(last_date, pd.Timestamp):
+            # Try to infer frequency, with fallback options
             freq = pd.infer_freq(self.data.index)
-            forecast_index = pd.date_range(start=last_date + pd.Timedelta(freq), periods=steps, freq=freq)
+            
+            if freq is None or freq == '':
+                # Calculate frequency from the time difference between consecutive points
+                if len(self.data.index) >= 2:
+                    time_diff = self.data.index[-1] - self.data.index[-2]
+                    
+                    # Convert to common frequency strings
+                    total_seconds = time_diff.total_seconds()
+                    if total_seconds == 60:  # 1 minute
+                        freq = '1T'
+                    elif total_seconds == 300:  # 5 minutes
+                        freq = '5T'
+                    elif total_seconds == 900:  # 15 minutes
+                        freq = '15T'
+                    elif total_seconds == 1800:  # 30 minutes
+                        freq = '30T'
+                    elif total_seconds == 3600:  # 1 hour
+                        freq = '1H'
+                    elif total_seconds == 7200:  # 2 hours
+                        freq = '2H'
+                    elif total_seconds == 14400:  # 4 hours
+                        freq = '4H'
+                    elif total_seconds == 86400:  # 1 day
+                        freq = '1D'
+                    else:
+                        # Default to hourly if can't determine
+                        freq = '1H'
+                else:
+                    freq = '1H'  # Default frequency
+            
+            try:
+                forecast_index = pd.date_range(start=last_date + pd.Timedelta(freq), periods=steps, freq=freq)
+            except (ValueError, TypeError):
+                # If still fails, create manual time index
+                if len(self.data.index) >= 2:
+                    time_diff = self.data.index[-1] - self.data.index[-2]
+                    forecast_index = [last_date + time_diff * (i + 1) for i in range(steps)]
+                    forecast_index = pd.DatetimeIndex(forecast_index)
+                else:
+                    # Fallback to hourly intervals
+                    forecast_index = pd.date_range(start=last_date + pd.Timedelta(hours=1), periods=steps, freq='1H')
         else:
             forecast_index = range(len(self.data), len(self.data) + steps)
         
         self.forecast_result = {
             'forecast': pd.Series(forecast, index=forecast_index),
-            'lower_ci': forecast_ci.iloc[:, 0],
-            'upper_ci': forecast_ci.iloc[:, 1],
+            'lower_ci': pd.Series(forecast_ci.iloc[:, 0].values, index=forecast_index),
+            'upper_ci': pd.Series(forecast_ci.iloc[:, 1].values, index=forecast_index),
             'confidence_level': confidence_level
         }
         
