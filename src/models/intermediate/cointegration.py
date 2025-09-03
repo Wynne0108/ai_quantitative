@@ -30,8 +30,13 @@ except ImportError:
     try:
         from statsmodels.tsa.johansen import coint_johansen
     except ImportError:
-        # Fallback - implement basic Johansen test or skip
-        coint_johansen = None
+        try:
+            # Try newer statsmodels structure
+            from statsmodels.tsa.api import coint_johansen
+        except ImportError:
+            # Final fallback - skip Johansen test
+            coint_johansen = None
+            print("Warning: Johansen test not available. Please update statsmodels: pip install statsmodels>=0.14.0")
 import matplotlib.pyplot as plt
 
 
@@ -355,22 +360,25 @@ class CointegrationAnalyzer:
     
     def generate_trading_signals(self, 
                                 pair_key: str,
-                                entry_threshold: float = 2.0,
-                                exit_threshold: float = 0.5,
-                                lookback_zscore: int = 60) -> pd.DataFrame:
+                                entry_threshold: float = None,
+                                exit_threshold: float = None,
+                                lookback_zscore: int = 60,
+                                dynamic_threshold: bool = True) -> pd.DataFrame:
         """
-        Generate trading signals based on cointegration spread
+        Generate trading signals based on cointegration spread with dynamic thresholds
         
         Parameters:
         -----------
         pair_key : str
             Asset pair key (e.g., 'BTC_ETH')
-        entry_threshold : float, default=2.0
-            Z-score threshold for trade entry
-        exit_threshold : float, default=0.5
-            Z-score threshold for trade exit
+        entry_threshold : float, optional
+            Z-score threshold for trade entry. If None, uses dynamic calculation
+        exit_threshold : float, optional
+            Z-score threshold for trade exit. If None, uses dynamic calculation  
         lookback_zscore : int, default=60
             Lookback period for z-score calculation
+        dynamic_threshold : bool, default=True
+            Whether to use dynamic thresholds based on volatility
         
         Returns:
         --------
@@ -381,10 +389,30 @@ class CointegrationAnalyzer:
         
         spread = self.spread_data[pair_key]
         
-        # Calculate rolling z-score
-        rolling_mean = spread.rolling(window=lookback_zscore).mean()
-        rolling_std = spread.rolling(window=lookback_zscore).std()
-        zscore = (spread - rolling_mean) / rolling_std
+        # Calculate rolling z-score with minimum periods
+        rolling_mean = spread.rolling(window=lookback_zscore, min_periods=max(10, lookback_zscore//4)).mean()
+        rolling_std = spread.rolling(window=lookback_zscore, min_periods=max(10, lookback_zscore//4)).std()
+        
+        # Avoid division by zero
+        zscore = (spread - rolling_mean) / rolling_std.where(rolling_std > 0, np.nan)
+        
+        # Dynamic threshold calculation based on volatility regime
+        if dynamic_threshold:
+            # Calculate volatility of z-scores for dynamic thresholds
+            zscore_volatility = zscore.rolling(window=lookback_zscore, min_periods=20).std()
+            volatility_regime = zscore_volatility / zscore_volatility.rolling(window=lookback_zscore*2, min_periods=40).mean()
+            
+            # Adjust thresholds based on volatility regime
+            dynamic_entry = 1.5 + 0.8 * volatility_regime.clip(0.5, 2.0)  # Range: 1.9-3.1
+            dynamic_exit = 0.3 + 0.4 * volatility_regime.clip(0.5, 1.5)   # Range: 0.5-0.9
+            
+            # Use provided thresholds or dynamic ones
+            entry_thresh_series = entry_threshold if entry_threshold is not None else dynamic_entry
+            exit_thresh_series = exit_threshold if exit_threshold is not None else dynamic_exit
+        else:
+            # Use fixed thresholds
+            entry_thresh_series = entry_threshold if entry_threshold is not None else 2.0
+            exit_thresh_series = exit_threshold if exit_threshold is not None else 0.5
         
         # Initialize signals
         signals = pd.DataFrame(index=spread.index)
@@ -393,32 +421,63 @@ class CointegrationAnalyzer:
         signals['position'] = 0
         signals['entry_signal'] = 0
         signals['exit_signal'] = 0
+        signals['stop_loss_signal'] = 0
         
-        # Generate signals
+        # Add dynamic thresholds to signals for tracking
+        if dynamic_threshold and not isinstance(entry_thresh_series, (int, float)):
+            signals['entry_threshold'] = entry_thresh_series
+            signals['exit_threshold'] = exit_thresh_series
+        
+        # Generate signals with risk management
         current_position = 0
+        entry_price = None
+        max_loss_pct = 0.02  # 2% stop loss
         
         for i in range(len(signals)):
             z = zscore.iloc[i]
+            current_spread = spread.iloc[i]
             
             if pd.isna(z):
                 continue
             
+            # Get current thresholds
+            if isinstance(entry_thresh_series, (int, float)):
+                entry_thresh = entry_thresh_series
+                exit_thresh = exit_thresh_series
+            else:
+                entry_thresh = entry_thresh_series.iloc[i] if not pd.isna(entry_thresh_series.iloc[i]) else 2.0
+                exit_thresh = exit_thresh_series.iloc[i] if not pd.isna(exit_thresh_series.iloc[i]) else 0.5
+            
             # Entry signals
             if current_position == 0:
-                if z > entry_threshold:
+                if z > entry_thresh and not pd.isna(z):
                     # Short spread (long asset2, short asset1)
                     current_position = -1
+                    entry_price = current_spread
                     signals.iloc[i, signals.columns.get_loc('entry_signal')] = -1
-                elif z < -entry_threshold:
+                elif z < -entry_thresh and not pd.isna(z):
                     # Long spread (long asset1, short asset2)
                     current_position = 1
+                    entry_price = current_spread
                     signals.iloc[i, signals.columns.get_loc('entry_signal')] = 1
             
-            # Exit signals
+            # Exit signals and risk management
             elif current_position != 0:
-                if abs(z) < exit_threshold:
-                    signals.iloc[i, signals.columns.get_loc('exit_signal')] = -current_position
-                    current_position = 0
+                # Calculate current P&L
+                if entry_price is not None:
+                    pnl_pct = abs(current_spread - entry_price) / abs(entry_price) if entry_price != 0 else 0
+                    
+                    # Stop loss check
+                    if pnl_pct > max_loss_pct:
+                        signals.iloc[i, signals.columns.get_loc('stop_loss_signal')] = -current_position
+                        signals.iloc[i, signals.columns.get_loc('exit_signal')] = -current_position
+                        current_position = 0
+                        entry_price = None
+                    # Normal exit condition
+                    elif abs(z) < exit_thresh:
+                        signals.iloc[i, signals.columns.get_loc('exit_signal')] = -current_position
+                        current_position = 0
+                        entry_price = None
             
             signals.iloc[i, signals.columns.get_loc('position')] = current_position
         
@@ -659,3 +718,258 @@ Best Test Results:
         report.append("\n" + "=" * 80)
         
         return "\n".join(report)
+    
+    def rolling_cointegration_test(self, 
+                                  window_size: int = 252,
+                                  step_size: int = 21,
+                                  min_periods: int = 100) -> Dict:
+        """
+        Perform rolling cointegration test to assess relationship stability
+        
+        Parameters:
+        -----------
+        window_size : int, default=252
+            Size of rolling window in periods (e.g., 252 for 1 year daily data)
+        step_size : int, default=21
+            Step size between windows (e.g., 21 for monthly steps)
+        min_periods : int, default=100
+            Minimum periods required for a valid test
+        
+        Returns:
+        --------
+        Dict containing rolling cointegration results
+        """
+        if len(self.price_data) < window_size + step_size:
+            raise ValueError(f"Insufficient data for rolling analysis. Need at least {window_size + step_size} periods")
+        
+        print(f"Running rolling cointegration test...")
+        print(f"  Window size: {window_size} periods")
+        print(f"  Step size: {step_size} periods")
+        print(f"  Total windows: {(len(self.price_data) - window_size) // step_size + 1}")
+        
+        rolling_results = []
+        windows_processed = 0
+        
+        # Generate rolling windows
+        for start_idx in range(0, len(self.price_data) - window_size + 1, step_size):
+            end_idx = start_idx + window_size
+            
+            # Extract window data
+            window_data = self.price_data.iloc[start_idx:end_idx]
+            window_start = window_data.index[0]
+            window_end = window_data.index[-1]
+            
+            if len(window_data) < min_periods:
+                continue
+            
+            try:
+                # Create temporary analyzer for this window
+                temp_analyzer = CointegrationAnalyzer(
+                    price_data=window_data,
+                    price_columns=self.price_columns,
+                    confidence_level=self.confidence_level
+                )
+                
+                # Test pairwise cointegration for this window
+                window_pairs_results = temp_analyzer.analyze_pairs_cointegration()
+                
+                # Extract summary statistics for this window
+                window_summary = {
+                    'window_start': window_start,
+                    'window_end': window_end,
+                    'window_length': len(window_data),
+                    'total_pairs': len(window_pairs_results),
+                    'cointegrated_pairs': sum(1 for p in window_pairs_results.values() if p['is_cointegrated']),
+                    'cointegration_rate': 0,
+                    'avg_p_value': np.mean([p['min_p_value'] for p in window_pairs_results.values()]),
+                    'min_p_value': min([p['min_p_value'] for p in window_pairs_results.values()]),
+                    'pairs_detail': {}
+                }
+                
+                # Calculate cointegration rate
+                if window_summary['total_pairs'] > 0:
+                    window_summary['cointegration_rate'] = window_summary['cointegrated_pairs'] / window_summary['total_pairs']
+                
+                # Store detailed results for each pair
+                for pair_name, pair_info in window_pairs_results.items():
+                    best_test = pair_info[f'test_{pair_info["best_direction"]}']
+                    window_summary['pairs_detail'][pair_name] = {
+                        'is_cointegrated': pair_info['is_cointegrated'],
+                        'p_value': pair_info['min_p_value'],
+                        'cointegration_coefficient': best_test['cointegration_coefficient'],
+                        'r_squared': best_test['r_squared'],
+                        'spread_volatility': best_test['spread_std']
+                    }
+                
+                rolling_results.append(window_summary)
+                windows_processed += 1
+                
+                # Progress indicator
+                if windows_processed % 10 == 0:
+                    print(f"    Processed {windows_processed} windows...")
+                
+            except Exception as e:
+                print(f"    Window {window_start} to {window_end} failed: {e}")
+                continue
+        
+        # Calculate stability metrics across all windows
+        stability_metrics = self._calculate_stability_metrics(rolling_results)
+        
+        final_results = {
+            'rolling_results': rolling_results,
+            'stability_metrics': stability_metrics,
+            'parameters': {
+                'window_size': window_size,
+                'step_size': step_size,
+                'min_periods': min_periods,
+                'total_windows_processed': windows_processed
+            }
+        }
+        
+        print(f"  Completed: {windows_processed} windows processed")
+        
+        return final_results
+    
+    def _calculate_stability_metrics(self, rolling_results: List[Dict]) -> Dict:
+        """Calculate stability metrics from rolling cointegration results"""
+        if not rolling_results:
+            return {}
+        
+        # Extract time series of key metrics
+        cointegration_rates = [r['cointegration_rate'] for r in rolling_results]
+        avg_p_values = [r['avg_p_value'] for r in rolling_results]
+        min_p_values = [r['min_p_value'] for r in rolling_results]
+        
+        # Calculate stability statistics
+        stability_metrics = {
+            'cointegration_rate_stability': {
+                'mean': np.mean(cointegration_rates),
+                'std': np.std(cointegration_rates),
+                'min': np.min(cointegration_rates),
+                'max': np.max(cointegration_rates),
+                'coefficient_of_variation': np.std(cointegration_rates) / np.mean(cointegration_rates) if np.mean(cointegration_rates) > 0 else np.inf
+            },
+            'p_value_stability': {
+                'avg_p_value_mean': np.mean(avg_p_values),
+                'avg_p_value_std': np.std(avg_p_values),
+                'min_p_value_mean': np.mean(min_p_values),
+                'min_p_value_std': np.std(min_p_values)
+            }
+        }
+        
+        # Analyze pair-specific stability
+        all_pairs = set()
+        for result in rolling_results:
+            all_pairs.update(result['pairs_detail'].keys())
+        
+        pair_stability = {}
+        for pair in all_pairs:
+            pair_cointegrated = []
+            pair_p_values = []
+            pair_coefficients = []
+            
+            for result in rolling_results:
+                if pair in result['pairs_detail']:
+                    pair_detail = result['pairs_detail'][pair]
+                    pair_cointegrated.append(pair_detail['is_cointegrated'])
+                    pair_p_values.append(pair_detail['p_value'])
+                    pair_coefficients.append(pair_detail['cointegration_coefficient'])
+            
+            if pair_cointegrated:
+                pair_stability[pair] = {
+                    'consistency_rate': np.mean(pair_cointegrated),  # How often is this pair cointegrated
+                    'p_value_mean': np.mean(pair_p_values),
+                    'p_value_std': np.std(pair_p_values),
+                    'coefficient_mean': np.mean(pair_coefficients),
+                    'coefficient_std': np.std(pair_coefficients),
+                    'total_windows': len(pair_cointegrated)
+                }
+        
+        stability_metrics['pair_specific_stability'] = pair_stability
+        
+        return stability_metrics
+    
+    def plot_rolling_cointegration_analysis(self, 
+                                           rolling_results: Dict,
+                                           figsize: Tuple[int, int] = (16, 12)):
+        """
+        Create comprehensive plots for rolling cointegration analysis
+        
+        Parameters:
+        -----------
+        rolling_results : Dict
+            Results from rolling_cointegration_test()
+        figsize : Tuple[int, int], default=(16, 12)
+            Figure size for plots
+        """
+        if not rolling_results or 'rolling_results' not in rolling_results:
+            print("No rolling results available for plotting")
+            return
+        
+        results = rolling_results['rolling_results']
+        stability = rolling_results['stability_metrics']
+        
+        fig, axes = plt.subplots(2, 2, figsize=figsize)
+        fig.suptitle('Rolling Cointegration Analysis', fontsize=16)
+        
+        # Extract time series data
+        dates = [r['window_end'] for r in results]
+        cointegration_rates = [r['cointegration_rate'] for r in results]
+        avg_p_values = [r['avg_p_value'] for r in results]
+        cointegrated_counts = [r['cointegrated_pairs'] for r in results]
+        
+        # Plot 1: Cointegration rate over time
+        axes[0, 0].plot(dates, cointegration_rates, marker='o', alpha=0.7)
+        axes[0, 0].set_title('Cointegration Detection Rate Over Time')
+        axes[0, 0].set_ylabel('Detection Rate')
+        axes[0, 0].grid(True, alpha=0.3)
+        axes[0, 0].tick_params(axis='x', rotation=45)
+        
+        # Add horizontal line for mean
+        mean_rate = np.mean(cointegration_rates)
+        axes[0, 0].axhline(y=mean_rate, color='red', linestyle='--', alpha=0.5, label=f'Mean: {mean_rate:.2f}')
+        axes[0, 0].legend()
+        
+        # Plot 2: Average p-values over time
+        axes[0, 1].plot(dates, avg_p_values, marker='s', alpha=0.7, color='orange')
+        axes[0, 1].set_title('Average p-values Over Time')
+        axes[0, 1].set_ylabel('Average p-value')
+        axes[0, 1].set_yscale('log')
+        axes[0, 1].grid(True, alpha=0.3)
+        axes[0, 1].tick_params(axis='x', rotation=45)
+        
+        # Add significance threshold line
+        axes[0, 1].axhline(y=self.confidence_level, color='red', linestyle='--', alpha=0.5, 
+                          label=f'Significance: {self.confidence_level}')
+        axes[0, 1].legend()
+        
+        # Plot 3: Number of cointegrated pairs over time
+        axes[1, 0].bar(range(len(dates)), cointegrated_counts, alpha=0.7, color='green')
+        axes[1, 0].set_title('Number of Cointegrated Pairs Over Time')
+        axes[1, 0].set_ylabel('Count')
+        axes[1, 0].set_xlabel('Window Index')
+        axes[1, 0].grid(True, alpha=0.3)
+        
+        # Plot 4: Pair-specific consistency (if available)
+        if 'pair_specific_stability' in stability:
+            pair_names = list(stability['pair_specific_stability'].keys())[:10]  # Top 10 pairs
+            consistency_rates = [stability['pair_specific_stability'][pair]['consistency_rate'] 
+                               for pair in pair_names]
+            
+            axes[1, 1].barh(pair_names, consistency_rates, alpha=0.7, color='purple')
+            axes[1, 1].set_title('Pair Consistency Rates')
+            axes[1, 1].set_xlabel('Consistency Rate (% of windows cointegrated)')
+            axes[1, 1].grid(True, alpha=0.3)
+            
+            # Add text annotations
+            for i, rate in enumerate(consistency_rates):
+                axes[1, 1].text(rate + 0.01, i, f'{rate:.2f}', va='center', fontsize=9)
+        else:
+            axes[1, 1].text(0.5, 0.5, 'Pair stability\ndata not available', 
+                           ha='center', va='center', transform=axes[1, 1].transAxes)
+            axes[1, 1].set_title('Pair Consistency')
+        
+        plt.tight_layout()
+        plt.show()
+        
+        return fig
